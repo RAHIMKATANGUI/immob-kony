@@ -1,0 +1,37 @@
+# Environnement local complet : PostgreSQL + application
+#   docker compose up --build
+#   docker compose run --rm app ./scripts/migrate.sh   (si RUN_MIGRATIONS=false)
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: immob
+      POSTGRES_PASSWORD: immob
+      POSTGRES_DB: immob_kony
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U immob -d immob_kony"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    ports: ["3000:3000"]
+    environment:
+      DATABASE_URL: postgresql://immob:immob@db:5432/immob_kony
+      DIRECT_URL: postgresql://immob:immob@db:5432/immob_kony
+      JWT_SECRET: ${JWT_SECRET:-change-me-local-secret-change-me-local-secret}
+      CRON_SECRET: ${CRON_SECRET:-local-cron-secret}
+      APP_URL: http://localhost:3000
+      RUN_MIGRATIONS: "true"
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+
+volumes:
+  pgdata:

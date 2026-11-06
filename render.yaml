@@ -1,0 +1,88 @@
+# =====================================================================
+#  IMMOB KONY — Blueprint Render (Infrastructure as Code)
+#  Render Dashboard → New → Blueprint → sélectionner ce dépôt GitHub
+# =====================================================================
+databases:
+  - name: immob-kony-db
+    databaseName: immob_kony
+    user: immob_kony
+    plan: basic-256mb
+    region: frankfurt
+    postgresMajorVersion: "16"
+    ipAllowList: [] # accès interne uniquement (ajoutez votre IP pour un accès externe)
+
+services:
+  # -------------------------------------------------------------------
+  #  Application (Frontend Next.js + API REST) — image Docker
+  # -------------------------------------------------------------------
+  - type: web
+    name: immob-kony
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    preDeployCommand: /app/scripts/migrate.sh
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: immob-kony-db
+          property: connectionString
+      - key: DIRECT_URL
+        fromDatabase:
+          name: immob-kony-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      - key: CRON_SECRET
+        generateValue: true
+      - key: APP_URL
+        sync: false # ex. https://immob-kony.onrender.com ou votre domaine
+      - key: APP_NAME
+        value: IMMOB KONY
+      - key: CURRENCY
+        value: XOF
+      - key: EMAIL_FROM
+        value: "IMMOB KONY <noreply@votre-domaine.com>"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: SMS_PROVIDER
+        value: console
+      - key: DATABASE_POOL_SIZE
+        value: "10"
+
+  # -------------------------------------------------------------------
+  #  Tâche planifiée : relances + génération des loyers (tous les jours 08:00 UTC = 08:00 Abidjan)
+  # -------------------------------------------------------------------
+  - type: cron
+    name: immob-kony-relances
+    runtime: node
+    plan: starter
+    region: frankfurt
+    schedule: "0 8 * * *"
+    buildCommand: echo "pas de build"
+    startCommand: >-
+      curl -fsS -X POST
+      -H "Authorization: Bearer $CRON_SECRET"
+      "https://$APP_HOST/api/cron/reminders"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: immob-kony
+          envVarKey: CRON_SECRET
+      - key: APP_HOST
+        fromService:
+          type: web
+          name: immob-kony
+          property: host
