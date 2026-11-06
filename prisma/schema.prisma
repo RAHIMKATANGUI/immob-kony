@@ -1,0 +1,513 @@
+// =====================================================================
+//  IMMOB KONY — Schéma Prisma (PostgreSQL)
+//  Montants : Decimal(14,2) — devise par défaut XOF (configurable)
+// =====================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  // Moteur sans binaire Rust : requêtes compilées en WASM + driver adapter "pg"
+  previewFeatures = ["driverAdapters", "queryCompiler"]
+  engineType      = "client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------
+//  Énumérations
+// ---------------------------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+}
+
+enum ApartmentStatus {
+  AVAILABLE   // Disponible
+  OCCUPIED    // Occupé
+  RESERVED    // Réservé
+  MAINTENANCE // En maintenance
+}
+
+enum RoomType {
+  LIVING_ROOM // Salon
+  BEDROOM     // Chambre
+  KITCHEN     // Cuisine
+  TOILET      // Toilette
+  SHOWER      // Douche
+  BALCONY     // Balcon
+  OFFICE      // Bureau
+}
+
+enum IdDocumentType {
+  CNI
+  PASSPORT
+  RESIDENCE_PERMIT
+  DRIVING_LICENSE
+  OTHER
+}
+
+enum LeaseStatus {
+  DRAFT
+  ACTIVE
+  TERMINATED
+  EXPIRED
+}
+
+enum RentStatus {
+  PAID     // Payé
+  PARTIAL  // Partiellement payé
+  LATE     // En retard
+  UNPAID   // Non payé
+}
+
+enum DepositStatus {
+  PENDING   // Non versée
+  PARTIAL   // Partiellement versée
+  PAID      // Soldée
+  REFUNDED  // Restituée
+}
+
+enum PaymentType {
+  RENT
+  DEPOSIT
+  ADVANCE
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  MOBILE_MONEY
+  CHECK
+  CARD
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum NotificationKind {
+  RENT_REMINDER_BEFORE
+  RENT_REMINDER_AFTER
+  PAYMENT_RECEIVED
+  LEASE_EXPIRING
+  SYSTEM
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  PAYMENT
+}
+
+// ---------------------------------------------------------------------
+//  Utilisateurs & acteurs
+// ---------------------------------------------------------------------
+
+model User {
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  passwordHash        String
+  role                Role      @default(MANAGER)
+  firstName           String
+  lastName            String
+  phone               String?
+  avatarUrl           String?
+  isActive            Boolean   @default(true)
+  onboardingCompleted Boolean   @default(false)
+  failedLoginCount    Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  manager       Manager?
+  auditLogs     AuditLog[]
+  notifications Notification[]   @relation("UserNotifications")
+  payments      Payment[]        @relation("PaymentRecordedBy")
+
+  @@index([role])
+}
+
+model Manager {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  firstName String
+  lastName  String
+  phone     String
+  email     String
+  address   String
+  company   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  residences Residence[]
+}
+
+model Owner {
+  id          String    @id @default(cuid())
+  code        String    @unique // ex: PRO-00001
+  firstName   String
+  lastName    String
+  phone       String
+  email       String?
+  address     String
+  notes       String?
+  createdById String?
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime? // suppression logique (historique conservé)
+
+  residences Residence[]
+
+  @@index([lastName, firstName])
+  @@index([deletedAt])
+}
+
+// ---------------------------------------------------------------------
+//  Patrimoine
+// ---------------------------------------------------------------------
+
+model Residence {
+  id          String    @id @default(cuid())
+  code        String    @unique // ex: RES-00001
+  name        String
+  address     String
+  city        String
+  commune     String
+  description String?
+  coverUrl    String?
+  ownerId     String
+  managerId   String?
+  createdById String?
+  updatedById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  owner      Owner       @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  manager    Manager?    @relation(fields: [managerId], references: [id], onDelete: SetNull)
+  apartments Apartment[]
+  tenants    Tenant[]
+  leases     Lease[]
+
+  @@index([ownerId])
+  @@index([managerId])
+  @@index([city, commune])
+}
+
+model Apartment {
+  id          String          @id @default(cuid())
+  residenceId String
+  number      String
+  floor       Int             @default(0)
+  surface     Decimal         @db.Decimal(8, 2)
+  roomsCount  Int             @default(1)
+  status      ApartmentStatus @default(AVAILABLE)
+  baseRent    Decimal         @default(0) @db.Decimal(14, 2)
+  description String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deletedAt   DateTime?
+
+  residence Residence @relation(fields: [residenceId], references: [id], onDelete: Cascade)
+  rooms     Room[]
+  tenants   Tenant[]
+  leases    Lease[]
+
+  @@unique([residenceId, number])
+  @@index([status])
+}
+
+model Room {
+  id          String   @id @default(cuid())
+  apartmentId String
+  type        RoomType
+  label       String?
+  surface     Decimal? @db.Decimal(8, 2)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  apartment Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+
+  @@index([apartmentId])
+}
+
+// ---------------------------------------------------------------------
+//  Locataires & baux
+// ---------------------------------------------------------------------
+
+model Tenant {
+  id             String          @id @default(cuid())
+  code           String          @unique // ex: LOC-00001
+  photoUrl       String?
+  firstName      String
+  lastName       String
+  phone          String
+  email          String?
+  profession     String?
+  idType         IdDocumentType  @default(CNI)
+  idNumber       String
+  idDocumentUrl  String?
+  entryDate      DateTime        @db.Date
+  exitDate       DateTime?       @db.Date
+  adults         Int             @default(1)
+  children       Int             @default(0)
+  totalOccupants Int             @default(1)
+  // Le locataire est rattaché soit à une résidence (ex : studio/chambre non découpé), soit à un appartement précis
+  residenceId    String
+  apartmentId    String?
+  signatureUrl   String?
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
+
+  residence     Residence      @relation(fields: [residenceId], references: [id], onDelete: Restrict)
+  apartment     Apartment?     @relation(fields: [apartmentId], references: [id], onDelete: SetNull)
+  leases        Lease[]
+  notifications Notification[]
+
+  @@index([lastName, firstName])
+  @@index([residenceId])
+  @@index([apartmentId])
+}
+
+model Lease {
+  id             String      @id @default(cuid())
+  reference      String      @unique // ex: BAIL-2026-00001
+  tenantId       String
+  residenceId    String
+  apartmentId    String?
+  startDate      DateTime    @db.Date
+  endDate        DateTime    @db.Date
+  durationMonths Int
+  monthlyRent    Decimal     @db.Decimal(14, 2)
+  charges        Decimal     @default(0) @db.Decimal(14, 2)
+  dueDay         Int         @default(5) // jour d'échéance dans le mois (1-28)
+  clauses        String?
+  status         LeaseStatus @default(ACTIVE)
+  // Solde disponible (avance non encore affectée à une échéance)
+  creditBalance  Decimal     @default(0) @db.Decimal(14, 2)
+  signedAt       DateTime?
+  terminatedAt   DateTime?
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  residence       Residence        @relation(fields: [residenceId], references: [id], onDelete: Restrict)
+  apartment       Apartment?       @relation(fields: [apartmentId], references: [id], onDelete: SetNull)
+  rents           Rent[]
+  deposit         Deposit?
+  payments        Payment[]
+  advancePayments AdvancePayment[]
+  notifications   Notification[]
+
+  @@index([status])
+  @@index([tenantId])
+  @@index([residenceId])
+}
+
+// ---------------------------------------------------------------------
+//  Finances
+// ---------------------------------------------------------------------
+
+model Rent {
+  id         String     @id @default(cuid())
+  leaseId    String
+  period     DateTime   @db.Date // 1er jour du mois concerné
+  dueDate    DateTime   @db.Date
+  amount     Decimal    @db.Decimal(14, 2)
+  amountPaid Decimal    @default(0) @db.Decimal(14, 2)
+  paidAt     DateTime?
+  status     RentStatus @default(UNPAID)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  lease         Lease            @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  allocations   RentAllocation[]
+  notifications Notification[]
+
+  @@unique([leaseId, period])
+  @@index([status, dueDate])
+}
+
+model Deposit {
+  id             String        @id @default(cuid())
+  leaseId        String        @unique
+  amount         Decimal       @db.Decimal(14, 2)
+  amountPaid     Decimal       @default(0) @db.Decimal(14, 2)
+  status         DepositStatus @default(PENDING)
+  firstPaidAt    DateTime?
+  refundedAmount Decimal?      @db.Decimal(14, 2)
+  refundedAt     DateTime?
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  lease    Lease     @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  payments Payment[]
+}
+
+// Encaissement (loyer, caution ou avance). Chaque paiement génère un reçu.
+model Payment {
+  id           String        @id @default(cuid())
+  leaseId      String
+  depositId    String?
+  type         PaymentType
+  method       PaymentMethod @default(CASH)
+  amount       Decimal       @db.Decimal(14, 2)
+  paidAt       DateTime
+  reference    String? // n° transaction mobile money, chèque…
+  notes        String?
+  recordedById String?
+  createdAt    DateTime      @default(now())
+
+  lease          Lease            @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  deposit        Deposit?         @relation(fields: [depositId], references: [id], onDelete: SetNull)
+  recordedBy     User?            @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  allocations    RentAllocation[]
+  receipt        Receipt?
+  advancePayment AdvancePayment?
+
+  @@index([leaseId, paidAt])
+  @@index([type])
+}
+
+// Ventilation d'un paiement sur les échéances de loyer
+model RentAllocation {
+  id        String   @id @default(cuid())
+  paymentId String
+  rentId    String
+  amount    Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  rent    Rent    @relation(fields: [rentId], references: [id], onDelete: Cascade)
+
+  @@index([rentId])
+}
+
+model AdvancePayment {
+  id               String   @id @default(cuid())
+  leaseId          String
+  paymentId        String   @unique
+  monthsCovered    Int
+  amount           Decimal  @db.Decimal(14, 2)
+  coveredFrom      DateTime @db.Date
+  coveredTo        DateTime @db.Date
+  remainingBalance Decimal  @db.Decimal(14, 2) // solde disponible après affectation
+  nextDueDate      DateTime @db.Date
+  createdAt        DateTime @default(now())
+
+  lease   Lease   @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([leaseId])
+}
+
+model Receipt {
+  id        String   @id @default(cuid())
+  number    String   @unique // ex: REC-2026-000001
+  paymentId String   @unique
+  amount    Decimal  @db.Decimal(14, 2)
+  issuedAt  DateTime @default(now())
+  // Jeton de vérification encodé dans le QR code (URL publique /verify/receipt/{token})
+  verifyToken String @unique @default(cuid())
+  label     String
+  emailedAt DateTime?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------
+//  Notifications & relances
+// ---------------------------------------------------------------------
+
+model Notification {
+  id         String              @id @default(cuid())
+  kind       NotificationKind
+  channel    NotificationChannel
+  status     NotificationStatus  @default(PENDING)
+  offsetDays Int? // -7, -3, -1, +1, +7, +15
+  title      String
+  message    String
+  recipient  String? // email / téléphone
+  userId     String?
+  tenantId   String?
+  leaseId    String?
+  rentId     String?
+  readAt     DateTime?
+  sentAt     DateTime?
+  error      String?
+  createdAt  DateTime            @default(now())
+
+  user   User?   @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lease  Lease?  @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  rent   Rent?   @relation(fields: [rentId], references: [id], onDelete: Cascade)
+
+  // Idempotence des relances : une seule relance par échéance / décalage / canal
+  @@unique([rentId, offsetDays, channel])
+  @@index([userId, readAt])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------
+//  Audit & séquences
+// ---------------------------------------------------------------------
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  userId    String?
+  userEmail String?
+  action    AuditAction
+  entity    String
+  entityId  String?
+  oldValue  Json?
+  newValue  Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// Compteurs pour les numéros métier (reçus, baux, codes…)
+model Sequence {
+  key   String @id // ex: RECEIPT-2026
+  value Int    @default(0)
+}
+
+// Paramètres globaux (devise, nom de l'agence, clauses par défaut…)
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
