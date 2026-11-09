@@ -329,6 +329,8 @@ export async function depositStatementPdf(depositId: string) {
   if (!deposit) throw notFound("Caution introuvable");
   const s = await getSettings();
   const { lease } = deposit;
+  const deductions = (Array.isArray(deposit.deductions) ? deposit.deductions : []) as unknown as { label: string; amount: number }[];
+  const owed = Math.max(0, toNumber(deposit.deductedAmount) - toNumber(deposit.amountPaid));
   const content: Content[] = [
     headerBand(s.agencyName, "RELEVÉ DE CAUTION", lease.reference),
     fieldGrid([
@@ -339,8 +341,13 @@ export async function depositStatementPdf(depositId: string) {
       ["Total versé", money(deposit.amountPaid, s.currency)],
       ["Restant à payer", money(toNumber(deposit.amount) - toNumber(deposit.amountPaid), s.currency)],
       ["Premier versement", date(deposit.firstPaidAt)],
-      ["Restitution", deposit.refundedAt ? `${money(deposit.refundedAmount, s.currency)} le ${formatDate(deposit.refundedAt)}` : "—"],
+      ["Total des retenues (dégâts)", money(deposit.deductedAmount ?? 0, s.currency)],
+      ["Montant rendu au locataire", deposit.refundedAt ? `${money(deposit.refundedAmount, s.currency)} le ${formatDate(deposit.refundedAt)}` : "—"],
+      ...(owed > 0 ? [["Reste dû par le locataire", money(owed, s.currency)] as [string, string]] : []),
     ]),
+    ...(deductions.length
+      ? [{ text: "Retenues pour dégâts (état des lieux de sortie)", style: "h2" } as Content, dataTable(["Motif", "Montant"], deductions.map((x) => [pdfText(x.label), money(x.amount, s.currency)]), ["*", "auto"])]
+      : []),
     { text: "Historique des versements", style: "h2" },
     deposit.payments.length
       ? dataTable(["Date", "Reçu", "Mode", "Référence", "Montant"], deposit.payments.map((p) => [formatDate(p.paidAt), p.receipt?.number ?? "—", PAYMENT_METHODS[p.method], p.reference ?? "—", money(p.amount, s.currency)]))
