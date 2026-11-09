@@ -363,6 +363,8 @@ model Deposit {
   firstPaidAt    DateTime?
   refundedAmount Decimal?      @db.Decimal(14, 2)
   refundedAt     DateTime?
+  deductedAmount Decimal?       @db.Decimal(14, 2) // total des retenues pour dégâts (sortie)
+  deductions     Json? // détail des retenues : [{ label, amount }]
   notes          String?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
