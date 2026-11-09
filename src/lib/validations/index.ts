@@ -120,6 +120,9 @@ export const leaseSchema = z
     charges: money.default(0),
     dueDay: int(1, 28).default(5),
     depositAmount: money.default(0),
+  advanceAmount: money.default(0), // avance sur loyer versée à l'entrée
+  advanceMonthly: money.default(0), // déduction mensuelle (0 = loyer complet)
+  advanceMethod: z.enum(["CASH", "BANK_TRANSFER", "MOBILE_MONEY", "CHECK", "CARD"]).default("CASH"),
     clauses: optStr(20_000),
     activate: z.boolean().default(true),
   });
