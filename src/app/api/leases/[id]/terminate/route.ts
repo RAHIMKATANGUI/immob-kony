@@ -27,7 +27,7 @@ export const POST = route<{ id: string }>({ permission: "leases:write" }, async 
     });
     await tx.tenant.update({ where: { id: lease.tenantId }, data: { exitDate: date } });
     if (lease.deposit && body.refundDeposit !== undefined) {
-      await tx.deposit.update({ where: { id: lease.deposit.id }, data: { status: "REFUNDED", refundedAmount: body.refundDeposit, refundedAt: date } });
+      await tx.deposit.update({ where: { id: lease.deposit.id }, data: { status: "REFUNDED", refundedAmount: body.refundDeposit, refundedAt: date, deductedAmount: Math.max(0, toNumber(lease.deposit.amountPaid) - body.refundDeposit) } });
     }
     if (lease.apartmentId) await syncApartmentStatus(tx, lease.apartmentId);
     return l;
