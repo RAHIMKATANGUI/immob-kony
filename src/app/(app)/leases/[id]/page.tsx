@@ -2,13 +2,14 @@
 import { use, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Ban, FileDown, HandCoins, Printer, ShieldCheck, Sparkles, Undo2 } from "lucide-react";
+import { Ban, FileDown, HandCoins, Printer, ShieldCheck, PiggyBank, Sparkles, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/page-header";
 import { Info, Section } from "@/components/shared/info";
 import { DepositStatusBadge, LeaseStatusBadge, PaymentTypeBadge, RentStatusBadge } from "@/components/shared/status-badges";
 import { PaymentDialog } from "@/components/forms/payment-dialog";
 import { DepositRefundDialog } from "@/components/forms/deposit-refund-dialog";
+import { RentAdvanceDialog } from "@/components/forms/rent-advance-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
@@ -27,11 +28,11 @@ type Data = {
     residence: { id: string; name: string; owner: { firstName: string; lastName: string }; manager: { firstName: string; lastName: string } | null };
     apartment: { id: string; number: string } | null;
     deposit: { id: string; amount: string; amountPaid: string; status: keyof typeof DEPOSIT_STATUS; refundedAmount: string | null; refundedAt: string | null; deductedAmount: string | null; deductions: { label: string; amount: number }[] | null; payments: { id: string; paidAt: string; amount: string; receipt: { id: string; number: string } | null }[] } | null;
-    rents: { id: string; period: string; dueDate: string; amount: string; amountPaid: string; status: keyof typeof RENT_STATUS; paidAt: string | null }[];
+    rents: { id: string; period: string; dueDate: string; amount: string; amountPaid: string; status: keyof typeof RENT_STATUS; paidAt: string | null; advanceApplied: string }[];
     payments: { id: string; paidAt: string; amount: string; type: keyof typeof PAYMENT_TYPES; method: keyof typeof PAYMENT_METHODS; reference: string | null; receipt: { id: string; number: string } | null; recordedBy: { firstName: string; lastName: string } | null }[];
     advancePayments: { id: string; monthsCovered: number; amount: string; coveredFrom: string; coveredTo: string; remainingBalance: string; nextDueDate: string; createdAt: string }[];
   };
-  balance: { monthlyTotal: number; totalDue: number; totalPaid: number; arrears: number; creditBalance: number; nextDueDate: string | null; nextDueAmount: number; paidUntil: string | null };
+  balance: { advanceBalance: number; advanceMonthly: number; monthlyTotal: number; totalDue: number; totalPaid: number; arrears: number; creditBalance: number; nextDueDate: string | null; nextDueAmount: number; paidUntil: string | null };
 };
 
 export default function LeaseDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -41,6 +42,7 @@ export default function LeaseDetail({ params }: { params: Promise<{ id: string }
   const [pay, setPay] = useState<"RENT" | "DEPOSIT" | null>(null);
   const [term, setTerm] = useState(false);
   const [refund, setRefund] = useState(false);
+  const [adv, setAdv] = useState(false);
   const [termForm, setTermForm] = useState({ date: new Date().toISOString().slice(0, 10), reason: "", refundDeposit: "" });
   const terminate = useMutation({
     mutationFn: () => apiPost(`/api/leases/${id}/terminate`, { date: termForm.date, reason: termForm.reason, refundDeposit: termForm.refundDeposit === "" ? undefined : Number(termForm.refundDeposit) }),
@@ -63,6 +65,7 @@ export default function LeaseDetail({ params }: { params: Promise<{ id: string }
             <Button variant="outline" onClick={() => window.open(`/api/leases/${l.id}/contract`, "_blank")}><Printer /> Contrat</Button>
             <Button variant="outline" onClick={() => (window.location.href = `/api/leases/${l.id}/contract?download=1`)}><FileDown /> PDF</Button>
             {l.status === "ACTIVE" && <Button variant="outline" onClick={() => setTerm(true)}><Ban /> Résilier</Button>}
+            {l.status === "ACTIVE" && <Button variant="outline" onClick={() => setAdv(true)}><PiggyBank /> Avance sur loyer</Button>}
             {l.status === "ACTIVE" && <Button variant="brand" onClick={() => setPay("RENT")}><HandCoins /> Encaisser</Button>}
           </>
         }
@@ -95,7 +98,7 @@ export default function LeaseDetail({ params }: { params: Promise<{ id: string }
                       <TableCell className="capitalize">{formatMonth(r.period)}</TableCell>
                       <TableCell className="hidden sm:table-cell">{formatDate(r.dueDate)}</TableCell>
                       <TableCell className="tabular-nums">{formatMoney(r.amount)}</TableCell>
-                      <TableCell className="hidden tabular-nums sm:table-cell">{formatMoney(r.amountPaid)}</TableCell>
+                      <TableCell className="hidden tabular-nums sm:table-cell">{formatMoney(r.amountPaid)}{Number(r.advanceApplied) > 0 && <span className="block text-xs text-muted-foreground">dont avance {formatMoney(r.advanceApplied)}</span>}</TableCell>
                       <TableCell><RentStatusBadge status={r.status} /></TableCell>
                     </TableRow>
                   ))}
@@ -162,6 +165,15 @@ export default function LeaseDetail({ params }: { params: Promise<{ id: string }
               </div>
             </Section>
           )}
+          {(b.advanceBalance > 0 || l.payments.some((p) => p.type === "RENT_ADVANCE")) && (
+            <Section title="Avance sur loyer">
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between"><dt className="text-muted-foreground">Avance restante</dt><dd className="font-semibold tabular-nums text-brand">{formatMoney(b.advanceBalance)}</dd></div>
+                <div className="flex justify-between"><dt className="text-muted-foreground">Déduite chaque mois</dt><dd className="font-semibold tabular-nums">{formatMoney(b.advanceMonthly)}</dd></div>
+                {b.advanceBalance > 0 && b.advanceMonthly > 0 && <div className="flex justify-between border-t pt-2"><dt className="text-muted-foreground">Le locataire paie par mois</dt><dd className="font-semibold tabular-nums">{formatMoney(Math.max(0, b.monthlyTotal - b.advanceMonthly))}</dd></div>}
+              </dl>
+            </Section>
+          )}
           {l.advancePayments.length > 0 && (
             <Section title="Paiements anticipés">
               <ul className="space-y-2">
@@ -178,6 +190,7 @@ export default function LeaseDetail({ params }: { params: Promise<{ id: string }
       </div>
 
       <PaymentDialog open={!!pay} onOpenChange={(o) => !o && setPay(null)} leaseId={l.id} defaultType={pay ?? "RENT"} />
+      <RentAdvanceDialog open={adv} onOpenChange={setAdv} leaseId={l.id} monthlyTotal={b.monthlyTotal} currentMonthly={b.advanceMonthly} />
       {l.deposit && <DepositRefundDialog open={refund} onOpenChange={setRefund} deposit={l.deposit} title={`${l.tenant.firstName} ${l.tenant.lastName}`} />}
       <Dialog open={term} onOpenChange={setTerm}>
         <DialogContent className="max-w-md">
