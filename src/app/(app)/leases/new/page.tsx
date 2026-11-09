@@ -15,6 +15,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { FormField } from "@/components/ui/form-field";
 import { leaseSchema } from "@/lib/validations";
+import { PAYMENT_METHODS } from "@/lib/labels";
 import { apiGet, apiPost, HttpError } from "@/lib/api-client";
 import { useOptions } from "@/hooks/use-options";
 import { addMonthsLabel, formatMoney } from "@/lib/format-client";
@@ -31,10 +32,10 @@ function NewLeaseForm() {
     resolver: zodResolver(leaseSchema),
     defaultValues: {
       tenantId: sp.get("tenantId") ?? "", residenceId: sp.get("residenceId") ?? "", apartmentId: sp.get("apartmentId") ?? "",
-      startDate: new Date().toISOString().slice(0, 10), durationMonths: 12, monthlyRent: 0, charges: 0, dueDay: 5, depositAmount: 0, clauses: "", activate: true,
+      startDate: new Date().toISOString().slice(0, 10), durationMonths: 12, monthlyRent: 0, charges: 0, dueDay: 5, depositAmount: 0, advanceAmount: 0, advanceMonthly: 0, advanceMethod: "CASH", clauses: "", activate: true,
     },
   });
-  const [residenceId, apartmentId, startDate, duration, rent, charges, deposit] = useWatch({ control, name: ["residenceId", "apartmentId", "startDate", "durationMonths", "monthlyRent", "charges", "depositAmount"] });
+  const [residenceId, apartmentId, startDate, duration, rent, charges, deposit, advance, advanceMonthly] = useWatch({ control, name: ["residenceId", "apartmentId", "startDate", "durationMonths", "monthlyRent", "charges", "depositAmount", "advanceAmount", "advanceMonthly"] });
   const tenants = useOptions("tenants", "&state=active");
   const residences = useOptions("residences");
   const apartments = useOptions("apartments", `&residenceId=${residenceId}`, !!residenceId);
@@ -59,6 +60,7 @@ function NewLeaseForm() {
     }
   };
   const total = (Number(rent) || 0) + (Number(charges) || 0);
+  const perMonth = Number(advanceMonthly) > 0 ? Number(advanceMonthly) : total;
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 lg:grid-cols-3" noValidate>
@@ -93,6 +95,9 @@ function NewLeaseForm() {
             <FormField label="Date de début" required error={errors.startDate?.message}><Input type="date" {...register("startDate")} /></FormField>
             <FormField label="Durée (mois)" required error={errors.durationMonths?.message}><Input type="number" min={1} {...register("durationMonths")} /></FormField>
             <FormField label="Caution (dépôt de garantie)" error={errors.depositAmount?.message}><Input type="number" step="1000" {...register("depositAmount")} /></FormField>
+              <FormField label="Avance sur loyer" error={errors.advanceAmount?.message} hint="Montant libre versé à l'entrée"><Input type="number" step="1000" {...register("advanceAmount")} /></FormField>
+              <FormField label="Déduction mensuelle de l'avance" error={errors.advanceMonthly?.message} hint="Retirée du loyer chaque mois (0 = loyer complet)"><Input type="number" step="1000" {...register("advanceMonthly")} /></FormField>
+              <FormField label="Paiement de l'avance"><NativeSelect {...register("advanceMethod")}>{Object.entries(PAYMENT_METHODS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</NativeSelect></FormField>
           </div>
         </Section>
         <Section title="Clauses du contrat" description="Pré-remplies avec vos clauses par défaut (Paramètres).">
@@ -105,6 +110,13 @@ function NewLeaseForm() {
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between"><dt className="text-muted-foreground">Mensualité totale</dt><dd className="font-semibold">{formatMoney(total)}</dd></div>
               <div className="flex justify-between"><dt className="text-muted-foreground">Caution</dt><dd className="font-semibold">{formatMoney(deposit)}</dd></div>
+                  {Number(advance) > 0 && (
+                    <>
+                      <div className="flex justify-between"><dt className="text-muted-foreground">Avance sur loyer</dt><dd className="font-semibold">{formatMoney(advance)}</dd></div>
+                      <div className="flex justify-between"><dt className="text-muted-foreground">Déduite par mois</dt><dd className="font-semibold">{formatMoney(perMonth)}{perMonth > 0 ? ` · ${Math.ceil(Number(advance) / perMonth)} mois` : ""}</dd></div>
+                      <div className="flex justify-between"><dt className="text-muted-foreground">Le locataire paie par mois</dt><dd className="font-semibold">{formatMoney(Math.max(0, total - perMonth))}</dd></div>
+                    </>
+                  )}
               <div className="flex justify-between"><dt className="text-muted-foreground">Fin du bail</dt><dd className="font-semibold">{addMonthsLabel(String(startDate), Number(duration) || 0)}</dd></div>
               <div className="flex justify-between border-t pt-3"><dt className="text-muted-foreground">Montant total du bail</dt><dd className="font-display text-lg font-bold text-brand">{formatMoney(total * (Number(duration) || 0))}</dd></div>
             </dl>
