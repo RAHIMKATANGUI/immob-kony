@@ -116,6 +116,7 @@ export async function receiptPdf(receiptId: string) {
         ["Loyer mensuel (charges incl.)", money(balance.monthlyTotal, s.currency)],
         ["Arriéré", money(balance.arrears, s.currency)],
         ["Solde disponible (avance)", money(balance.creditBalance, s.currency)],
+          ["Avance sur loyer restante", money(balance.advanceBalance, s.currency)],
         ["Payé jusqu'à", balance.paidUntil ? pdfText(formatMonth(balance.paidUntil)) : "—"],
         ["Prochaine échéance", balance.nextDueDate ? date(balance.nextDueDate) : "—"],
         ["Montant prochaine échéance", money(balance.nextDueAmount, s.currency)],
