@@ -2,12 +2,13 @@
 import { use, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Ban, FileDown, HandCoins, Printer, ShieldCheck, Sparkles } from "lucide-react";
+import { Ban, FileDown, HandCoins, Printer, ShieldCheck, Sparkles, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/page-header";
 import { Info, Section } from "@/components/shared/info";
 import { DepositStatusBadge, LeaseStatusBadge, PaymentTypeBadge, RentStatusBadge } from "@/components/shared/status-badges";
 import { PaymentDialog } from "@/components/forms/payment-dialog";
+import { DepositRefundDialog } from "@/components/forms/deposit-refund-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
@@ -25,7 +26,7 @@ type Data = {
     tenant: { id: string; firstName: string; lastName: string; phone: string; email: string | null };
     residence: { id: string; name: string; owner: { firstName: string; lastName: string }; manager: { firstName: string; lastName: string } | null };
     apartment: { id: string; number: string } | null;
-    deposit: { id: string; amount: string; amountPaid: string; status: keyof typeof DEPOSIT_STATUS; refundedAmount: string | null; refundedAt: string | null; payments: { id: string; paidAt: string; amount: string; receipt: { id: string; number: string } | null }[] } | null;
+    deposit: { id: string; amount: string; amountPaid: string; status: keyof typeof DEPOSIT_STATUS; refundedAmount: string | null; refundedAt: string | null; deductedAmount: string | null; deductions: { label: string; amount: number }[] | null; payments: { id: string; paidAt: string; amount: string; receipt: { id: string; number: string } | null }[] } | null;
     rents: { id: string; period: string; dueDate: string; amount: string; amountPaid: string; status: keyof typeof RENT_STATUS; paidAt: string | null }[];
     payments: { id: string; paidAt: string; amount: string; type: keyof typeof PAYMENT_TYPES; method: keyof typeof PAYMENT_METHODS; reference: string | null; receipt: { id: string; number: string } | null; recordedBy: { firstName: string; lastName: string } | null }[];
     advancePayments: { id: string; monthsCovered: number; amount: string; coveredFrom: string; coveredTo: string; remainingBalance: string; nextDueDate: string; createdAt: string }[];
@@ -39,6 +40,7 @@ export default function LeaseDetail({ params }: { params: Promise<{ id: string }
   const { data } = useItem<Data>("leases", id);
   const [pay, setPay] = useState<"RENT" | "DEPOSIT" | null>(null);
   const [term, setTerm] = useState(false);
+  const [refund, setRefund] = useState(false);
   const [termForm, setTermForm] = useState({ date: new Date().toISOString().slice(0, 10), reason: "", refundDeposit: "" });
   const terminate = useMutation({
     mutationFn: () => apiPost(`/api/leases/${id}/terminate`, { date: termForm.date, reason: termForm.reason, refundDeposit: termForm.refundDeposit === "" ? undefined : Number(termForm.refundDeposit) }),
@@ -144,10 +146,18 @@ export default function LeaseDetail({ params }: { params: Promise<{ id: string }
                 <div className="flex justify-between"><dt className="text-muted-foreground">Montant</dt><dd className="font-semibold tabular-nums">{formatMoney(l.deposit.amount)}</dd></div>
                 <div className="flex justify-between"><dt className="text-muted-foreground">Versé</dt><dd className="font-semibold tabular-nums">{formatMoney(l.deposit.amountPaid)}</dd></div>
                 <div className="flex justify-between border-t pt-2"><dt className="text-muted-foreground">Restant à payer</dt><dd className={cn("font-semibold tabular-nums", depositDue > 0 && "text-destructive")}>{formatMoney(depositDue)}</dd></div>
-                {l.deposit.refundedAt && <div className="flex justify-between"><dt className="text-muted-foreground">Restitué le {formatDate(l.deposit.refundedAt)}</dt><dd className="font-semibold tabular-nums">{formatMoney(l.deposit.refundedAmount)}</dd></div>}
+                {l.deposit.deductions && l.deposit.deductions.length > 0 && (
+                <div className="border-t pt-2">
+                  <dt className="mb-1 text-muted-foreground">Retenues pour dégâts</dt>
+                  {l.deposit.deductions.map((x, i) => <dd key={i} className="flex justify-between text-xs"><span>{x.label}</span><span className="tabular-nums text-destructive">− {formatMoney(x.amount)}</span></dd>)}
+                </div>
+              )}
+              {Number(l.deposit.deductedAmount ?? 0) > Number(l.deposit.amountPaid) && <div className="flex justify-between text-destructive"><dt>Reste dû par le locataire</dt><dd className="font-semibold tabular-nums">{formatMoney(Number(l.deposit.deductedAmount) - Number(l.deposit.amountPaid))}</dd></div>}
+              {l.deposit.refundedAt && <div className="flex justify-between"><dt className="text-muted-foreground">Rendu au locataire le {formatDate(l.deposit.refundedAt)}</dt><dd className="font-semibold tabular-nums">{formatMoney(l.deposit.refundedAmount)}</dd></div>}
               </dl>
               <div className="mt-4 flex flex-wrap gap-2">
                 {depositDue > 0 && l.status === "ACTIVE" && <Button size="sm" variant="secondary" onClick={() => setPay("DEPOSIT")}><ShieldCheck /> Verser</Button>}
+                {l.deposit.status !== "REFUNDED" && Number(l.deposit.amountPaid) > 0 && <Button size="sm" variant="brand" onClick={() => setRefund(true)}><Undo2 /> Restituer</Button>}
                 <Button size="sm" variant="outline" onClick={() => window.open(`/api/deposits/${l.deposit!.id}/pdf`, "_blank")}><FileDown /> Relevé PDF</Button>
               </div>
             </Section>
@@ -168,6 +178,7 @@ export default function LeaseDetail({ params }: { params: Promise<{ id: string }
       </div>
 
       <PaymentDialog open={!!pay} onOpenChange={(o) => !o && setPay(null)} leaseId={l.id} defaultType={pay ?? "RENT"} />
+      {l.deposit && <DepositRefundDialog open={refund} onOpenChange={setRefund} deposit={l.deposit} title={`${l.tenant.firstName} ${l.tenant.lastName}`} />}
       <Dialog open={term} onOpenChange={setTerm}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -178,7 +189,7 @@ export default function LeaseDetail({ params }: { params: Promise<{ id: string }
             <FormField label="Date de fin effective"><Input type="date" value={termForm.date} onChange={(e) => setTermForm({ ...termForm, date: e.target.value })} /></FormField>
             <FormField label="Motif"><Input value={termForm.reason} onChange={(e) => setTermForm({ ...termForm, reason: e.target.value })} placeholder="Départ volontaire, fin de contrat…" /></FormField>
             {l.deposit && Number(l.deposit.amountPaid) > 0 && (
-              <FormField label="Caution restituée" hint={`Versée : ${formatMoney(l.deposit.amountPaid)} — laisser vide pour décider plus tard`}>
+              <FormField label="Caution restituée" hint={`Versée : ${formatMoney(l.deposit.amountPaid)} — laisser vide pour faire ensuite le décompte des dégâts (bouton « Restituer »)`}>
                 <Input type="number" value={termForm.refundDeposit} onChange={(e) => setTermForm({ ...termForm, refundDeposit: e.target.value })} />
               </FormField>
             )}
