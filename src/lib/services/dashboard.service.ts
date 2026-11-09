@@ -37,10 +37,10 @@ export async function getDashboard(session: SessionPayload, now: Date = todayFn(
     prisma.rent.findMany({ where: { lease: leaseWhere, period: monthStart }, select: { amount: true, amountPaid: true, status: true } }),
     prisma.rent.findMany({ where: { lease: leaseWhere, status: "LATE" }, select: { amount: true, amountPaid: true } }),
     prisma.payment.findMany({
-      where: { lease: leaseWhere, paidAt: { gte: twelveAgo }, type: { in: ["RENT", "ADVANCE"] } },
+      where: { lease: leaseWhere, paidAt: { gte: twelveAgo }, type: { in: ["RENT", "ADVANCE", "RENT_ADVANCE"] } },
       select: { amount: true, paidAt: true },
     }),
-    prisma.payment.aggregate({ where: { lease: leaseWhere, paidAt: { gte: yearStart }, type: { in: ["RENT", "ADVANCE"] } }, _sum: { amount: true } }),
+    prisma.payment.aggregate({ where: { lease: leaseWhere, paidAt: { gte: yearStart }, type: { in: ["RENT", "ADVANCE", "RENT_ADVANCE"] } }, _sum: { amount: true } }),
     prisma.rent.findMany({
       where: { lease: { ...leaseWhere, status: "ACTIVE" }, status: { not: "PAID" }, dueDate: { gte: now, lte: addMonths(now, 1) } },
       include: { lease: { include: { tenant: true, residence: true, apartment: true } } },
