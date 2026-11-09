@@ -75,6 +75,7 @@ enum PaymentType {
   RENT
   DEPOSIT
   ADVANCE
+  RENT_ADVANCE // avance sur loyer (déduite chaque mois)
 }
 
 enum PaymentMethod {
@@ -309,6 +310,9 @@ model Lease {
   status         LeaseStatus @default(ACTIVE)
   // Solde disponible (avance non encore affectée à une échéance)
   creditBalance  Decimal     @default(0) @db.Decimal(14, 2)
+  // Avance sur loyer : solde restant et montant déduit chaque mois du loyer dû
+  advanceBalance Decimal     @default(0) @db.Decimal(14, 2)
+  advanceMonthly Decimal     @default(0) @db.Decimal(14, 2)
   signedAt       DateTime?
   terminatedAt   DateTime?
   createdById    String?
@@ -341,6 +345,7 @@ model Rent {
   dueDate    DateTime   @db.Date
   amount     Decimal    @db.Decimal(14, 2)
   amountPaid Decimal    @default(0) @db.Decimal(14, 2)
+  advanceApplied Decimal @default(0) @db.Decimal(14, 2) // part réglée par l'avance sur loyer
   paidAt     DateTime?
   status     RentStatus @default(UNPAID)
   createdAt  DateTime   @default(now())

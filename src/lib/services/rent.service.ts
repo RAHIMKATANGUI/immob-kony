@@ -61,8 +61,72 @@ export async function ensureRents(db: Tx, leaseId: string, until: Date = todayFn
       skipDuplicates: true,
     });
   }
+  await applyAdvance(db, lease.id);
   await applyCredit(db, lease.id);
   return lease;
+}
+
+/**
+ * Avance sur loyer : déduit chaque mois un montant fixe (advanceMonthly) de l'échéance,
+ * tant qu'il reste de l'avance (advanceBalance). Une échéance n'est déduite qu'une fois.
+ */
+async function applyAdvance(db: Tx, leaseId: string) {
+  const lease = await db.lease.findUniqueOrThrow({ where: { id: leaseId } });
+  let balance = toNumber(lease.advanceBalance);
+  const perMonth = toNumber(lease.advanceMonthly);
+  if (balance <= 0 || perMonth <= 0) return;
+  const open = await db.rent.findMany({ where: { leaseId, status: { not: "PAID" }, advanceApplied: 0 }, orderBy: { period: "asc" } });
+  for (const r of open) {
+    if (balance <= 0) break;
+    const due = round(toNumber(r.amount) - toNumber(r.amountPaid));
+    const part = round(Math.min(perMonth, balance, due));
+    if (part <= 0) continue;
+    balance = round(balance - part);
+    await updateRentPaid(db, r, round(toNumber(r.amountPaid) + part), new Date());
+    await db.rent.update({ where: { id: r.id }, data: { advanceApplied: part } });
+  }
+  await db.lease.update({ where: { id: leaseId }, data: { advanceBalance: balance } });
+}
+
+export interface RecordAdvanceInput {
+  leaseId: string;
+  amount: number;
+  monthlyDeduction: number;
+  method: PaymentMethod;
+  paidAt: Date;
+  reference?: string | null;
+  notes?: string | null;
+  recordedById?: string | null;
+}
+
+/** Encaisse une avance sur loyer (montant libre) : elle est déduite automatiquement, mois après mois, du loyer dû. */
+export async function recordRentAdvance(input: RecordAdvanceInput, db?: Tx) {
+  const run = async (tx: Tx) => {
+    const lease = await tx.lease.findUnique({ where: { id: input.leaseId } });
+    if (!lease) throw notFound("Bail introuvable");
+    if (lease.status !== "ACTIVE") throw badRequest("Le bail n'est pas actif");
+    if (input.amount <= 0) throw badRequest("Montant invalide");
+    if (input.monthlyDeduction <= 0) throw badRequest("La déduction mensuelle doit être supérieure à 0");
+    const payment = await tx.payment.create({
+      data: {
+        leaseId: lease.id,
+        type: "RENT_ADVANCE",
+        method: input.method,
+        amount: input.amount,
+        paidAt: input.paidAt,
+        reference: input.reference ?? null,
+        notes: input.notes ?? null,
+        recordedById: input.recordedById ?? null,
+      },
+    });
+    await tx.lease.update({ where: { id: lease.id }, data: { advanceBalance: { increment: input.amount }, advanceMonthly: input.monthlyDeduction } });
+    await ensureRents(tx, lease.id);
+    const receipt = await tx.receipt.create({
+      data: { number: await nextReceiptNumber(tx), paymentId: payment.id, amount: input.amount, label: "Avance sur loyer" },
+    });
+    return { payment, receipt, advance: null, creditBalance: toNumber(lease.creditBalance), monthsCovered: 0 };
+  };
+  return db ? run(db) : prisma.$transaction(run, { timeout: 20_000 });
 }
 
 /** Impute le solde disponible du bail sur les échéances ouvertes. */
@@ -120,6 +184,8 @@ export interface LeaseBalance {
   totalPaid: number;
   arrears: number; // arriéré : échéances passées non soldées
   creditBalance: number; // solde disponible
+  advanceBalance: number; // avance sur loyer restante
+  advanceMonthly: number; // montant de l'avance déduit chaque mois
   nextDueDate: Date | null;
   nextDueAmount: number;
   paidUntil: Date | null; // dernier mois intégralement payé
@@ -150,7 +216,7 @@ export async function leaseBalance(leaseId: string, db: Tx = prisma, now: Date =
     const candidate = addMonths(lastPeriod, 1);
     if (candidate <= lease.endDate) {
       nextDueDate = dueDateFor(candidate, lease.dueDay);
-      nextDueAmount = Math.max(0, round(monthly - toNumber(lease.creditBalance)));
+      nextDueAmount = Math.max(0, round(monthly - toNumber(lease.creditBalance) - Math.min(toNumber(lease.advanceMonthly), toNumber(lease.advanceBalance))));
     }
   }
   return {
@@ -159,6 +225,8 @@ export async function leaseBalance(leaseId: string, db: Tx = prisma, now: Date =
     totalPaid: round(totalPaid),
     arrears: round(arrears),
     creditBalance: toNumber(lease.creditBalance),
+    advanceBalance: toNumber(lease.advanceBalance),
+    advanceMonthly: toNumber(lease.advanceMonthly),
     nextDueDate,
     nextDueAmount,
     paidUntil,
