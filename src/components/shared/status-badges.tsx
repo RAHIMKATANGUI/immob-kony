@@ -24,7 +24,7 @@ export function DepositStatusBadge({ status }: { status: keyof typeof DEPOSIT_ST
 }
 
 export function PaymentTypeBadge({ type }: { type: keyof typeof PAYMENT_TYPES }) {
-  const v: Record<string, V> = { RENT: "info", DEPOSIT: "default", ADVANCE: "success" };
+  const v: Record<string, V> = { RENT: "info", DEPOSIT: "default", ADVANCE: "success", RENT_ADVANCE: "warning" };
   return <Badge variant={v[type]}>{PAYMENT_TYPES[type]}</Badge>;
 }
 
