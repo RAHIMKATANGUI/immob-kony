@@ -1,10 +1,11 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileDown } from "lucide-react";
+import { FileDown, Undo2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable } from "@/components/shared/data-table";
 import { ExportMenu } from "@/components/shared/export-menu";
+import { DepositRefundDialog } from "@/components/forms/deposit-refund-dialog";
 import { DepositStatusBadge } from "@/components/shared/status-badges";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -13,13 +14,14 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { formatDate, formatMoney } from "@/lib/utils";
 import { DEPOSIT_STATUS } from "@/lib/labels";
 
-type Row = { id: string; amount: string; amountPaid: string; status: keyof typeof DEPOSIT_STATUS; firstPaidAt: string | null; lease: { id: string; reference: string; tenant: { firstName: string; lastName: string }; residence: { name: string }; apartment: { number: string } | null }; payments: { id: string; amount: string; paidAt: string; receipt: { id: string; number: string } | null }[] };
+type Row = { id: string; amount: string; amountPaid: string; status: keyof typeof DEPOSIT_STATUS; firstPaidAt: string | null; refundedAmount: string | null; deductedAmount: string | null; lease: { id: string; reference: string; tenant: { firstName: string; lastName: string }; residence: { name: string }; apartment: { number: string } | null }; payments: { id: string; amount: string; paidAt: string; receipt: { id: string; number: string } | null }[] };
 
 export default function DepositsPage() {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
+  const [refund, setRefund] = useState<Row | null>(null);
   const dq = useDebounce(q);
   const { data, isLoading } = useList<Row>("deposits", { q: dq, status, page });
   const totals = data?.totals as { amount: number; paid: number } | undefined;
@@ -34,6 +36,7 @@ export default function DepositsPage() {
           ))}
         </div>
       )}
+      <DepositRefundDialog open={!!refund} onOpenChange={(o) => !o && setRefund(null)} deposit={refund} title={refund ? `${refund.lease.tenant.firstName} ${refund.lease.tenant.lastName}` : undefined} />
       <DataTable
         rows={data?.items}
         loading={isLoading}
@@ -59,8 +62,10 @@ export default function DepositsPage() {
           { key: "rest", header: "Restant", cell: (r) => { const v = Number(r.amount) - Number(r.amountPaid); return <span className={v > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}>{formatMoney(v)}</span>; } },
           { key: "date", header: "1er versement", cell: (r) => formatDate(r.firstPaidAt), hideOnMobile: true },
           { key: "hist", header: "Versements", cell: (r) => r.payments.length, hideOnMobile: true },
+          { key: "deducted", header: "Retenues", cell: (r) => (Number(r.deductedAmount ?? 0) > 0 ? <span className="text-destructive">{formatMoney(r.deductedAmount)}</span> : "—"), hideOnMobile: true },
+          { key: "refunded", header: "Rendu", cell: (r) => (r.status === "REFUNDED" ? formatMoney(r.refundedAmount ?? 0) : "—"), hideOnMobile: true },
           { key: "status", header: "Statut", cell: (r) => <DepositStatusBadge status={r.status} /> },
-          { key: "pdf", header: "", cell: (r) => <Button variant="ghost" size="icon" className="size-8" onClick={(e) => { e.stopPropagation(); window.open(`/api/deposits/${r.id}/pdf`, "_blank"); }} aria-label="Relevé PDF"><FileDown /></Button> },
+          { key: "pdf", header: "", cell: (r) => <div className="flex justify-end gap-1">{r.status !== "REFUNDED" && Number(r.amountPaid) > 0 && <Button variant="ghost" size="icon" className="size-8" onClick={(e) => { e.stopPropagation(); setRefund(r); }} aria-label="Restituer la caution" title="Restituer la caution"><Undo2 /></Button>}<Button variant="ghost" size="icon" className="size-8" onClick={(e) => { e.stopPropagation(); window.open(`/api/deposits/${r.id}/pdf`, "_blank"); }} aria-label="Relevé PDF" title="Relevé PDF"><FileDown /></Button></div> },
         ]}
       />
     </>
