@@ -7,7 +7,7 @@ import { audit } from "@/lib/audit";
 import { badRequest, conflict } from "@/lib/errors";
 import { nextLeaseReference } from "@/lib/sequence";
 import { addDays, addMonths, toDateOnly } from "@/lib/dates";
-import { ensureRents } from "@/lib/services/rent.service";
+import { ensureRents, recordRentAdvance } from "@/lib/services/rent.service";
 import { assertPlacement, syncApartmentStatus } from "@/lib/services/tenant.service";
 import { getSettings } from "@/lib/settings";
 
@@ -65,6 +65,7 @@ export const POST = route({ permission: "leases:write" }, async (ctx) => {
   const already = await prisma.lease.findFirst({ where: { tenantId: tenant.id, status: "ACTIVE" } });
   if (already) throw conflict(`Ce locataire a déjà un bail actif (${already.reference}).`);
 
+  if (data.advanceAmount > 0 && !data.activate) throw badRequest("Activez le bail pour enregistrer une avance sur loyer");
   const settings = await getSettings();
   const start = toDateOnly(data.startDate);
   const end = addDays(addMonths(start, data.durationMonths), -1);
@@ -93,6 +94,19 @@ export const POST = route({ permission: "leases:write" }, async (ctx) => {
     await tx.tenant.update({ where: { id: tenant.id }, data: { residenceId: data.residenceId, apartmentId: data.apartmentId ?? tenant.apartmentId } });
     if (data.activate) {
       await ensureRents(tx, l.id);
+      if (data.advanceAmount > 0) {
+        await recordRentAdvance(
+          {
+            leaseId: l.id,
+            amount: data.advanceAmount,
+            monthlyDeduction: data.advanceMonthly > 0 ? data.advanceMonthly : data.monthlyRent + data.charges,
+            method: data.advanceMethod,
+            paidAt: start,
+            recordedById: ctx.session.sub,
+          },
+          tx,
+        );
+      }
       if (data.apartmentId) await syncApartmentStatus(tx, data.apartmentId);
     }
     return l;
