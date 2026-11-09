@@ -42,6 +42,7 @@ export const PAYMENT_TYPES = {
   RENT: "Loyer",
   DEPOSIT: "Caution",
   ADVANCE: "Loyer + avance",
+  RENT_ADVANCE: "Avance sur loyer",
 } as const;
 
 export const PAYMENT_METHODS = {
